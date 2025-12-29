@@ -1,0 +1,73 @@
+# fly.toml － horse_racing_inf 後端主服務
+# 生成日期：2025-12-29  🚀  第一次部署前，請先執行：
+#   fly apps create horse-racing-inf --org <你的組織名>
+
+app = "horse-racing-inf"          # 若名字被佔用，改成 horse-racing-inf-xyz
+primary_region = "hkg"            # 離台灣/香港最近；可改 nrt、sin、iad…
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[experimental]
+  auto_rollback = true            # 部署失敗自動回滾
+
+[build]
+  # ❶ Docker 專案用這行（Dockerfile 在根目錄）
+  dockerfile = "Dockerfile"
+
+  # ❷ 若是 Python 純專案，沒 Dockerfile，可改用 buildpack：
+  # builder = "paketobuildpacks/builder:base"
+
+[env]
+  # 放「非機密」的預設值；機密請用 `fly secrets set KEY=val`
+  PORT = "8080"
+  PYTHONUNBUFFERED = "1"
+  ENV = "production"
+  LOG_LEVEL = "info"
+  # 資料庫連線字元編碼
+  DATABASE_CHARSET = "utf8mb4"
+
+[http_service]
+  internal_port = 8080            # 必須與上面 PORT 一致
+  force_https = true              # 自動 http→https
+  auto_stop_machines = "stop"     # 沒流量時關機省錢
+  auto_start_machines = true
+  min_machines_running = 0        # 想保持 1 台熱機可改 1
+  processes = ["app"]
+
+  # 健康檢查 ── 成功才對外流量
+  [http_service.checks]
+    [http_service.checks.alive]
+      grace_period = "15s"
+      interval = "30s"
+      method = "GET"
+      path = "/healthz"           # ← 在程式裡實作這支 API
+      timeout = "5s"
+      tls_skip_verify = false
+
+# 若需要 TCP / gRPC 額外端口，可再開一組 [[services]]
+# [[services]]
+#   internal_port = 9000
+#   protocol = "tcp"
+#   auto_stop_machines = true
+#   auto_start_machines = true
+#   [[services.ports]]
+#     port = 9000
+
+# 掛載永久磁碟（資料庫、logs、模型權重…）
+# 第一次先 `fly volume create horse_data --region hkg --size 3`
+[mounts]
+  source = "horse_data"
+  destination = "/data"
+  processes = ["app"]
+
+# 資源限制 ── 依免費額度/實測調整
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512                 # Python + 輕量 DB 夠用；不夠再調 1024
+
+# 若需要「多程序」架構（worker / scheduler），在這裡加
+# [processes]
+#   app = "gunicorn -w 4 -b 0.0.0.0:8080 app:app"
+#   worker = "celery -A tasks worker --loglevel=info"
+# 然後在 [[vm]] 或 [http_service] 裡用 processes 指定
