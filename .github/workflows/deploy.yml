@@ -1,0 +1,95 @@
+# .github/workflows/deploy.yml
+name: CD → VPS 一鍵部署
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:          # 手動觸發按鈕
+
+env:
+  # 以下 4 個值請在 Settings → Secrets and variables → Actions 新增
+  # SSH_KEY        : 可登入 VPS 的 private key (完整含頭尾)
+  # VPS_HOST       : IP 或域名，例如 1.2.3.4
+  # VPS_USER       : 登入帳號，例如 root 或 ubuntu
+  # SLACK_WEBHOOK  : https://hooks.slack.com/services/...
+  IMAGE_NAME: horse-racing-inf
+  CONTAINER_NAME: horse-racing-inf
+  DEPLOY_PATH: /opt/horse-racing-inf   # 遠端專案目錄
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # ---------- 1. 拉原始碼 ----------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------- 2. 登錄 Docker Hub（可改 GHCR） ----------
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}   # 可選
+          password: ${{ secrets.DOCKERHUB_TOKEN }}      # 可選
+
+      # ---------- 3. 建置映像並推上 registry ----------
+      - name: Build & push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      # ---------- 4. 設定 SSH ----------
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_vps
+          chmod 600 ~/.ssh/id_vps
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      # ---------- 5. 同步檔案（docker-compose.yml 等） ----------
+      - name: Rsync repo to VPS
+        run: |
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/id_vps -o StrictHostKeyChecking=no" \
+            --exclude='.git/' --exclude='node_modules/' \
+            ./ ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ env.DEPLOY_PATH }}
+
+      # ---------- 6. 遠端重啟容器 ----------
+      - name: Deploy container
+        run: |
+          ssh -i ~/.ssh/id_vps -o StrictHostKeyChecking=no \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+            set -e
+            cd ${{ env.DEPLOY_PATH }}
+
+            # 拉最新映像
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+
+            # 用 docker-compose 重啟（零停機）
+            docker compose -f docker-compose.yml up -d --remove-orphans
+
+            # 等待容器健康
+            for i in {1..10}; do
+              if [ "$(docker inspect -f '{{.State.Health.Status}}' ${{ env.CONTAINER_NAME }} 2>/dev/null)" == "healthy" ]; then
+                echo "✅ Health check passed"
+                exit 0
+              fi
+              sleep 5
+            done
+            echo "❌ Container not healthy"
+            exit 1
+          EOF
+
+      # ---------- 7. 通知 Slack ----------
+      - name: Slack notification
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            ${{ job.status == 'success' && '🟢 部署成功' || '🔴 部署失敗' }}  
+            `${{ github.event.head_commit.message }}`
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
