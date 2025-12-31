@@ -48,4 +48,17 @@ except Exception as e:
       - name: 📢 Notify on main branch push (optional)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          echo "✅ Successfully validated and built Docker image for horse-racing-inf"
+          echo "✅ Successfully validated and built Docker image for horse-racing-inf"# .github/workflows/validate.yml
+name: Validate Docker Build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image (local test only)
+        run: docker build -t horse-racing-inf .
