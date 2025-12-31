@@ -32,8 +32,8 @@ def main():
     for file in excel_files:
         try:
             df = pd.read_excel(os.path.join(data_dir, file))
-            # 清理欄位名稱（移除前後空格）
-            df.columns = df.columns.str.strip()
+            # 🔥 關鍵修正：自動移除欄位名稱中的所有空格
+            df.columns = df.columns.astype(str).str.replace(' ', '', regex=False)
             all_data.append(df)
             print(f"✅ 已載入: {file} ({len(df)} 筆記錄)")
         except Exception as e:
@@ -46,8 +46,8 @@ def main():
     df = pd.concat(all_data, ignore_index=True)
     print(f"\n📊 總共合併 {len(df)} 筆賽馬記錄")
     
-    # 必要欄位（根據你提供的檔案）
-    required_cols = ["名次", "實際 負磅", "排位 體重", "檔位", "獨贏 賠率", "騎師", "練馬師"]
+    # 必要欄位（無空格版本，因已自動清理）
+    required_cols = ["名次", "實際負磅", "排位體重", "檔位", "獨贏賠率", "騎師", "練馬師"]
     
     # 檢查欄位是否存在
     missing_cols = [col for col in required_cols if col not in df.columns]
@@ -67,16 +67,16 @@ def main():
     # 目標變量：是否入前三
     df["is_top3"] = df["名次"].apply(lambda x: 1 if x in [1, 2, 3] else 0)
     
-    # 處理賠率
-    df["獨贏 賠率"] = pd.to_numeric(df["獨贏 賠率"], errors="coerce")
-    df["獨贏 賠率"] = df["獨贏 賠率"].fillna(999)  # 冷門馬設高值
+    # 處理賠率（現在欄位是 '獨贏賠率'，無空格）
+    df["獨贏賠率"] = pd.to_numeric(df["獨贏賠率"], errors="coerce")
+    df["獨贏賠率"] = df["獨贏賠率"].fillna(999)  # 冷門馬設高值
     
     # 騎師 & 練馬師編碼
     df["jockey_id"] = pd.Categorical(df["騎師"]).codes
     df["trainer_id"] = pd.Categorical(df["練馬師"]).codes
     
-    # 特徵欄位
-    feature_cols = ["實際 負磅", "排位 體重", "檔位", "獨贏 賠率", "jockey_id", "trainer_id"]
+    # 特徵欄位（無空格）
+    feature_cols = ["實際負磅", "排位體重", "檔位", "獨贏賠率", "jockey_id", "trainer_id"]
     df = df.dropna(subset=feature_cols)
     
     print(f"🔧 有效訓練樣本數: {len(df)}")
