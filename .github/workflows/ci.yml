@@ -1,0 +1,51 @@
+name: CI - Horse Racing API
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-and-validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🛎️ Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🔍 Check Python syntax (optional)
+        run: |
+          find . -name "*.py" -not -path "./venv/*" -exec python -m py_compile {} \;
+
+      - name: ✅ Run health check test (mock)
+        run: |
+          python -c "
+import sys
+sys.path.insert(0, '.')
+try:
+    from api import app
+    print('✅ FastAPI app imported successfully')
+except Exception as e:
+    print(f'❌ Failed to import app: {e}')
+    exit(1)
+          "
+
+      - name: 🐳 Build Docker image (local validation only)
+        run: |
+          docker build -t horse-racing-inf .
+
+      - name: 📢 Notify on main branch push (optional)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          echo "✅ Successfully validated and built Docker image for horse-racing-inf"
