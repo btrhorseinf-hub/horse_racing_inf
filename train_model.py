@@ -1,101 +1,116 @@
+# train_model.py
+import os
 import pandas as pd
-import numpy as np
+import joblib
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, accuracy_score
-import joblib
+from sklearn.metrics import accuracy_score, classification_report
 from pathlib import Path
 
-# ==============================
-# 1. 載入所有 Excel 賽果檔案
-# ==============================
-def load_race_results(file_paths):
-    all_races = []
-    for file in file_paths:
-        df = pd.read_excel(file)
-        # 假設每場比賽以 "Race X" 開頭的行作為分隔（根據你提供的格式）
-        # 此處簡化：假設 DataFrame 已經是「每匹馬一行」的結構
-        # 若實際格式不同，需先清洗（見下方備註）
-        all_races.append(df)
-    return pd.concat(all_races, ignore_index=True)
-
-# ==============================
-# 2. 特徵工程
-# ==============================
-def engineer_features(df):
-    # 複製避免修改原始數據
-    df = df.copy()
+def main():
+    # 設定路徑
+    data_dir = "data"
+    model_dir = "model"
+    model_path = os.path.join(model_dir, "model.pkl")
     
-    # 目標變量：是否跑入前三
-    df['is_top3'] = df['名次'].apply(lambda x: 1 if x in [1, 2, 3] else 0)
+    # 檢查 data 資料夾是否存在
+    if not os.path.exists(data_dir):
+        print(f"❌ 錯誤: '{data_dir}' 資料夾不存在！")
+        print("請先建立 'data' 資料夾，並將你的 Excel 檔案放入其中。")
+        return
     
-    # 清理賠率（轉為數值）
-    df['獨贏賠率'] = pd.to_numeric(df['獨贏賠率'], errors='coerce').fillna(999)  # 冷門設高值
+    # 列出所有 .xlsx 檔案
+    excel_files = [f for f in os.listdir(data_dir) if f.endswith('.xlsx')]
+    if not excel_files:
+        print(f"❌ 錯誤: '{data_dir}' 中沒有 .xlsx 檔案！")
+        return
     
-    # 騎師 & 練馬師 → 轉為 ID（簡單編碼）
-    df['jockey_id'] = pd.Categorical(df['騎師']).codes
-    df['trainer_id'] = pd.Categorical(df['練馬師']).codes
+    print(f"📥 找到 {len(excel_files)} 個 Excel 檔案: {excel_files}")
     
-    # 選擇特徵
-    feature_cols = [
-        '實際負磅', '排位體重', '檔位',
-        '獨贏賠率', 'jockey_id', 'trainer_id'
-    ]
+    # 合併所有數據
+    all_data = []
+    for file in excel_files:
+        try:
+            df = pd.read_excel(os.path.join(data_dir, file))
+            # 清理欄位名稱（移除前後空格）
+            df.columns = df.columns.str.strip()
+            all_data.append(df)
+            print(f"✅ 已載入: {file} ({len(df)} 筆記錄)")
+        except Exception as e:
+            print(f"⚠️ 跳過 {file}: {e}")
     
-    # 移除缺失值
-    df = df.dropna(subset=feature_cols + ['is_top3'])
+    if not all_data:
+        print("❌ 沒有成功載入任何數據！")
+        return
     
-    return df, feature_cols
-
-# ==============================
-# 3. 訓練模型
-# ==============================
-def train_and_save_model(df, feature_cols, model_path="model/model.pkl"):
+    df = pd.concat(all_data, ignore_index=True)
+    print(f"\n📊 總共合併 {len(df)} 筆賽馬記錄")
+    
+    # 必要欄位（根據你提供的檔案）
+    required_cols = ["名次", "實際負磅", "排位體重", "檔位", "獨贏賠率", "騎師", "練馬師"]
+    
+    # 檢查欄位是否存在
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        print(f"❌ 缺少必要欄位: {missing_cols}")
+        print("可用欄位:", list(df.columns))
+        return
+    
+    # 只保留必要欄位
+    df = df[required_cols].copy()
+    
+    # 清理數據
+    df = df.dropna(subset=["名次"])  # 移除名次缺失
+    df["名次"] = pd.to_numeric(df["名次"], errors="coerce")
+    df = df.dropna(subset=["名次"])
+    
+    # 目標變量：是否入前三
+    df["is_top3"] = df["名次"].apply(lambda x: 1 if x in [1, 2, 3] else 0)
+    
+    # 處理賠率
+    df["獨贏賠率"] = pd.to_numeric(df["獨贏賠率"], errors="coerce")
+    df["獨贏賠率"] = df["獨贏賠率"].fillna(999)  # 冷門馬設高值
+    
+    # 騎師 & 練馬師編碼
+    df["jockey_id"] = pd.Categorical(df["騎師"]).codes
+    df["trainer_id"] = pd.Categorical(df["練馬師"]).codes
+    
+    # 特徵欄位
+    feature_cols = ["實際負磅", "排位體重", "檔位", "獨贏賠率", "jockey_id", "trainer_id"]
+    df = df.dropna(subset=feature_cols)
+    
+    print(f"🔧 有效訓練樣本數: {len(df)}")
+    
+    if len(df) < 10:
+        print("❌ 數據太少，無法訓練模型！")
+        return
+    
+    # 準備訓練數據
     X = df[feature_cols]
-    y = df['is_top3']
+    y = df["is_top3"]
     
-    # 分割訓練/測試集
+    # 分割數據
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
     
-    # 訓練隨機森林
+    # 訓練模型
+    print("🧠 訓練隨機森林模型...")
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
     
     # 評估
     y_pred = model.predict(X_test)
-    print("✅ 模型準確率:", accuracy_score(y_test, y_pred))
+    acc = accuracy_score(y_test, y_pred)
+    print(f"✅ 測試準確率: {acc:.2%}")
     print("\n📊 分類報告:")
     print(classification_report(y_test, y_pred, target_names=["未入位", "入位"]))
     
     # 儲存模型
-    Path(model_path).parent.mkdir(exist_ok=True)
+    Path(model_dir).mkdir(exist_ok=True)
     joblib.dump(model, model_path)
     print(f"\n💾 模型已儲存至: {model_path}")
-    
-    return model, feature_cols
+    print("\n🎉 訓練完成！現在可以部署 API 了。")
 
-# ==============================
-# 主程式
-# ==============================
 if __name__ == "__main__":
-    # 列出你的 Excel 檔案
-    files = [
-        "data/HKJ_local_results_20230910.xlsx",
-        "data/HKJ_local_results_20230913.xlsx",
-        "data/HKJ_local_results_20230917.xlsx",
-        "data/HKJ_local_results_20230920.xlsx"
-    ]
-    
-    print("📥 載入賽馬數據...")
-    raw_df = load_race_results(files)
-    
-    print("🔧 特徵工程...")
-    df, features = engineer_features(raw_df)
-    
-    print(f"📊 共 {len(df)} 筆有效樣本")
-    print(f"🎯 特徵: {features}")
-    
-    print("\n🧠 訓練模型...")
-    model, _ = train_and_save_model(df, features)
+    main()
