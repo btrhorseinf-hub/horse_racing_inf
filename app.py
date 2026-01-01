@@ -67,7 +67,7 @@ with col1:
 # ======================
 # 處理預測邏輯（帶 Loading Spinner）
 # ======================
-API_URL = "https://horse-racing-inf.onrender.com/predict"  # ← 替換為你的 Render URL
+API_URL = "https://horse-racing-inf.onrender.com/api/predict"  # ← 替換為你的 Render URL
 
 if predict_button:
     # 驗證輸入
