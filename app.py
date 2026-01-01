@@ -1,188 +1,158 @@
-# app.py
 import streamlit as st
 import requests
-from datetime import datetime
+import json
 
-# ⚠️ 必須是第一個 Streamlit 指令！
+# ======================
+# 設定頁面基本資訊
+# ======================
 st.set_page_config(
-    page_title="🏇 賽馬入位預測",
-    page_icon="🐎",
-    layout="centered"
+    page_title="賽馬入位預測系統 🐎",
+    page_icon="🏇",
+    layout="wide"
 )
 
-# ==============================
-# 初始化 session_state
-# ==============================
-if "history" not in st.session_state:
-    st.session_state.history = []  # 儲存歷史紀錄
-
-if "actual_weight" not in st.session_state:
-    st.session_state.actual_weight = 56.0
-if "declared_weight" not in st.session_state:
-    st.session_state.declared_weight = 58.0
-if "draw" not in st.session_state:
-    st.session_state.draw = 3
-if "win_odds" not in st.session_state:
-    st.session_state.win_odds = 3.5
-if "jockey_id" not in st.session_state:
-    st.session_state.jockey_id = 1
-if "trainer_id" not in st.session_state:
-    st.session_state.trainer_id = 2
-
-# ==============================
-# 功能函式
-# ==============================
-def reset_inputs():
-    """重置所有輸入為預設值"""
-    st.session_state.actual_weight = 56.0
-    st.session_state.declared_weight = 58.0
-    st.session_state.draw = 3
-    st.session_state.win_odds = 3.5
-    st.session_state.jockey_id = 1
-    st.session_state.trainer_id = 2
-
-def add_to_history(input_data, result):
-    """將預測結果加入歷史紀錄"""
-    record = {
-        "時間": datetime.now().strftime("%m-%d %H:%M"),
-        "負磅": input_data["actual_weight"],
-        "體重": input_data["declared_weight"],
-        "檔位": input_data["draw"],
-        "賠率": input_data["win_odds"],
-        "騎師ID": input_data["jockey_id"],
-        "練馬師ID": input_data["trainer_id"],
-        "預測": result["prediction"],
-        "機率": f"{result['top3_probability']:.1%}"
+# ======================
+# 樣式美化
+# ======================
+st.markdown("""
+<style>
+    .main { padding: 2rem; }
+    .stButton>button {
+        background-color: #4CAF50;
+        color: white;
+        font-weight: bold;
+        border-radius: 8px;
+        padding: 0.5rem 1rem;
     }
-    st.session_state.history.insert(0, record)  # 插入到最前面（最新在上）
+    .prediction-box {
+        background-color: #f0f8ff;
+        padding: 1rem;
+        border-radius: 10px;
+        margin-top: 1rem;
+        border-left: 4px solid #4CAF50;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# ==============================
-# 頁面標題
-# ==============================
+# ======================
+# 應用標題與說明
+# ======================
 st.title("🏇 賽馬入位預測系統")
 st.markdown("輸入馬匹資料，AI 幫你預測是否能進入前三名！")
 
-API_URL = "https://btr-horse-api.onrender.com/predict"
+# ======================
+# 初始化 session_state
+# ======================
+if 'history' not in st.session_state:
+    st.session_state.history = []
 
-# ==============================
-# 側邊欄：輸入表單
-# ==============================
-with st.sidebar:
-    st.header("請輸入馬匹資料")
-    
-    # 所有輸入綁定到 session_state
-    actual_weight = st.number_input(
-        "實際負磅 (kg)", min_value=40.0, max_value=70.0,
-        value=st.session_state.actual_weight, step=1.0,
-        key="actual_weight"
-    )
-    declared_weight = st.number_input(
-        "排位體重 (kg)", min_value=40.0, max_value=70.0,
-        value=st.session_state.declared_weight, step=1.0,
-        key="declared_weight"
-    )
-    draw = st.number_input(
-        "檔位", min_value=1, max_value=14,
-        value=st.session_state.draw,
-        key="draw"
-    )
-    win_odds = st.number_input(
-        "獨贏賠率", min_value=1.0, max_value=999.0,
-        value=st.session_state.win_odds, step=0.1,
-        key="win_odds"
-    )
-    jockey_id = st.number_input(
-        "騎師 ID", min_value=0, max_value=200,
-        value=st.session_state.jockey_id,
-        key="jockey_id"
-    )
-    trainer_id = st.number_input(
-        "練馬師 ID", min_value=0, max_value=200,
-        value=st.session_state.trainer_id,
-        key="trainer_id"
-    )
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        predict_button = st.button("🎯 預測", use_container_width=True)
-    with col2:
-        reset_button = st.button("🔄 重置", use_container_width=True, on_click=reset_inputs)
+# ======================
+# 輸入表單（左側）
+# ======================
+col1, col2 = st.columns([2, 3])
 
-# ==============================
-# 主內容區：處理預測
-# ==============================
+with col1:
+    st.subheader("📊 輸入馬匹資料")
+    
+    actual_weight = st.number_input("實際負磅 (kg)", min_value=0.0, value=55.0, step=0.5)
+    declared_weight = st.number_input("排位體重 (kg)", min_value=0.0, value=500.0, step=1.0)
+    draw = st.number_input("檔位", min_value=1, max_value=14, value=5)
+    win_odds = st.number_input("獨贏賠率", min_value=1.0, value=5.0, step=0.1)
+    jockey_id = st.number_input("騎師 ID", min_value=1, value=1)
+    trainer_id = st.number_input("練馬師 ID", min_value=1, value=1)
+
+    # 預測按鈕
+    predict_button = st.button("🎯 預測", use_container_width=True)
+
+# ======================
+# 處理預測邏輯（帶 Loading Spinner）
+# ======================
+API_URL = "https://horse-racing-inf.onrender.com/predict"  # ← 替換為你的 Render URL
+
 if predict_button:
-    with st.spinner("AI 正在分析中..."):
+    # 驗證輸入
+    if win_odds <= 0:
+        st.error("❌ 獨贏賠率必須大於 0")
+    else:
+        # 準備發送資料
+        data = {
+            "actual_weight": actual_weight,
+            "declared_weight": declared_weight,
+            "draw": draw,
+            "win_odds": win_odds,
+            "jockey_id": jockey_id,
+            "trainer_id": trainer_id
+        }
+
         try:
-            features = [
-                float(actual_weight),
-                float(declared_weight),
-                int(draw),
-                float(win_odds),
-                int(jockey_id),
-                int(trainer_id)
-            ]
-            
-            response = requests.post(
-                API_URL,
-                json={"features": features},
-                timeout=10
-            )
-            
+            # 👇 關鍵：加入 Loading Spinner
+            with st.spinner('🧠 正在連接 AI 模型，請稍候...'):
+                response = requests.post(API_URL, json=data, timeout=10)
+                
             if response.status_code == 200:
                 result = response.json()
-                prob = result["top3_probability"]
                 prediction = result["prediction"]
-                
-                # 顯示結果
-                st.subheader("📊 預測結果")
-                if prob >= 0.6:
-                    st.success(f"✅ 預測：{prediction}（機率：{prob:.1%}）")
-                elif prob >= 0.4:
-                    st.warning(f"⚠️ 預測：{prediction}（機率：{prob:.1%}）")
-                else:
-                    st.error(f"❌ 預測：{prediction}（機率：{prob:.1%}）")
-                
-                # 加入歷史紀錄
-                input_data = {
-                    "actual_weight": actual_weight,
-                    "declared_weight": declared_weight,
-                    "draw": draw,
-                    "win_odds": win_odds,
-                    "jockey_id": jockey_id,
-                    "trainer_id": trainer_id
-                }
-                add_to_history(input_data, result)
-                
-            else:
-                st.error(f"❌ API 回應錯誤：{response.status_code}")
-                
-        except Exception as e:
-            st.error(f"💥 發生錯誤：{str(e)}")
+                probability = result["probability"]
 
-# ==============================
-# 歷史紀錄區
-# ==============================
-if st.session_state.history:
-    st.markdown("---")
+                # 顯示結果
+                with col2:
+                    st.subheader("✅ 預測結果")
+                    if prediction == 1:
+                        st.markdown(f'<div class="prediction-box">🟢 <b>入位</b>（機率：{probability:.1%}）</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f'<div class="prediction-box">🔴 <b>未能入位</b>（機率：{1 - probability:.1%}）</div>', unsafe_allow_html=True)
+
+                # 儲存到歷史紀錄
+                record = {
+                    "input": data,
+                    "output": {"prediction": prediction, "probability": probability}
+                }
+                st.session_state.history.insert(0, record)  # 插入最前面
+
+            else:
+                with col2:
+                    st.error(f"⚠️ API 回應錯誤：{response.status_code}")
+                    st.code(response.text)
+
+        except requests.exceptions.Timeout:
+            with col2:
+                st.error("⏰ 請求超時！請檢查網路或稍後再試。")
+        except requests.exceptions.ConnectionError:
+            with col2:
+                st.error("🔌 無法連接到 AI 伺服器！請確認 API URL 是否正確。")
+        except Exception as e:
+            with col2:
+                st.error(f"💥 發生未知錯誤：{str(e)}")
+
+# ======================
+# 顯示歷史紀錄（右側）
+# ======================
+with col2:
     st.subheader("📜 歷史紀錄")
     
-    # 顯示清除按鈕
-    col_clear, _ = st.columns([1, 5])
-    with col_clear:
-        if st.button("🗑️ 清除紀錄"):
+    if st.session_state.history:
+        # 清除按鈕
+        if st.button("🗑️ 清除紀錄", key="clear"):
             st.session_state.history = []
-            st.rerun()  # 重新整理頁面
-    
-    # 顯示表格（最新在上）
-    st.dataframe(
-        st.session_state.history,
-        use_container_width=True,
-        hide_index=True
-    )
+            st.rerun()
 
-# ==============================
+        # 顯示最近 5 筆
+        for i, rec in enumerate(st.session_state.history[:5]):
+            inp = rec["input"]
+            out = rec["output"]
+            pred_text = "🟢 入位" if out["prediction"] == 1 else "🔴 未入位"
+            prob = f"{out['probability']:.1%}"
+            
+            st.markdown(f"""
+            <div style="background:#f9f9f9; padding:10px; border-radius:8px; margin-bottom:10px;">
+                <b>#{i+1}</b> 檔{inp['draw']} | 賠率{inp['win_odds']} | {pred_text} ({prob})
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("尚無預測紀錄。點擊左側「🎯 預測」開始使用！")
+
+# ======================
 # 頁尾
-# ==============================
+# ======================
 st.markdown("---")
-st.caption("本服務基於真實賽馬數據訓練的 AI 模型，僅供娛樂參考。理性投注，切勿沉迷。")
+st.caption("© 2026 賽馬入位預測系統 | Powered by Streamlit + FastAPI")
