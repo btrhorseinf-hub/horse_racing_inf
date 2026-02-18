@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <title>賽馬價值投注推薦</title>
+  <style>
+    body { font-family: Arial; background: #f5f7fa; color: #333; }
+    .card { background: white; border-radius: 10px; padding: 20px; margin: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #e6f2ff; }
+    .green { color: green; }
+    .red { color: red; }
+  </style>
+</head>
+<body>
+  <div style="text-align: center; margin: 30px;">
+    <h1>🏇 賽馬價值投注推薦</h1>
+    <p>Edge > 5% 的高價值馬匹（模型預測進前三機率 vs 市場賠率）</p>
+
+    <div style="display: flex; justify-content: center; gap: 20px; margin: 20px 0;">
+      <div class="card"><b>推薦場次</b><br><span id="race-count">-</span></div>
+      <div class="card"><b>總推薦數</b><br><span id="bet-count">-</span></div>
+      <div class="card"><b>平均 Edge</b><br><span id="avg-edge">-</span></div>
+    </div>
+
+    <table id="bets-table">
+      <thead>
+        <tr>
+          <th>場次</th>
+          <th>馬名</th>
+          <th>騎師</th>
+          <th>賠率</th>
+          <th>P(前三)</th>
+          <th>Edge</th>
+          <th>期望報酬</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <button onclick="refresh()">🔄 重新整理推薦</button>
+    <p style="margin-top: 10px; color: #666;">最後更新: <span id="last-update"></span></p>
+  </div>
+
+  <script>
+    async function loadBets() {
+      const res = await fetch('/api/bets');
+      const data = await res.json();
+      
+      const tbody = document.querySelector('#bets-table tbody');
+      tbody.innerHTML = '';
+      
+      if (data.status === 'error') {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: red;">❌ ' + data.message + '</td></tr>';
+        return;
+      }
+
+      const bets = data.bets;
+      document.getElementById('race-count').textContent = new Set(bets.map(b => b.race_name)).size;
+      document.getElementById('bet-count').textContent = bets.length;
+      document.getElementById('avg-edge').textContent = bets.length > 0 ? 
+        (bets.reduce((sum, b) => sum + b.edge, 0) / bets.length).toFixed(2) + '%' : '-';
+
+      bets.forEach(bet => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${bet.race_name}</td>
+          <td>${bet.horse_name}</td>
+          <td>${bet.jockey}</td>
+          <td>${bet.win_odds}</td>
+          <td>${bet.predicted_top3_prob}%</td>
+          <td class="green">${bet.edge > 0 ? '+' : ''}${bet.edge}%</td>
+          <td class="green">${bet.expected_return > 0 ? '+' : ''}${bet.expected_return}%</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('last-update').textContent = new Date().toLocaleString();
+    }
+
+    function refresh() {
+      loadBets();
+    }
+
+    window.onload = loadBets;
+  </script>
+</body>
+</html>

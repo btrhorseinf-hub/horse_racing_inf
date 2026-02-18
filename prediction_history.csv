@@ -1,0 +1,4 @@
+timestamp,input_hash,horse_name,jockey,trainer,win_odds,predicted_top3_prob,implied_probability,value_score,kelly_fraction,actual_result,notes
+2026-01-09 15:26:34,11ead03d,浪漫勇士,潘頓,沈集成,2.2,0.75,0.4545,0.2955,0.5417,,
+2026-01-09 15:26:34,11ead03d,金鑽貴人,莫雷拉,呂健威,4.5,0.75,0.2222,0.5278,0.6786,,
+2026-01-09 15:26:34,11ead03d,加州星球,蔡明紹,告東尼,3.8,0.75,0.2632,0.4868,0.6607,,

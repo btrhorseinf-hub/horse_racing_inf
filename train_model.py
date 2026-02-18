@@ -1,116 +1,149 @@
-# train_model.py
-import os
+# train_xgb_model.py —— 含 Optuna 超參數調優 + 特徵重要性分析
+
 import pandas as pd
+import numpy as np
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import roc_auc_score
+from xgboost import XGBClassifier
 import joblib
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
-from pathlib import Path
+import optuna
+import matplotlib.pyplot as plt
+
+# 全域變數（供 objective 函數使用）
+X_global = None
+y_global = None
+
+def objective(trial):
+    """Optuna 最佳化目標函數：最大化 CV AUC"""
+    params = {
+        "n_estimators": trial.suggest_int("n_estimators", 100, 500),
+        "max_depth": trial.suggest_int("max_depth", 3, 8),
+        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+        "subsample": trial.suggest_float("subsample", 0.6, 1.0),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
+        "reg_alpha": trial.suggest_float("reg_alpha", 0, 10),
+        "reg_lambda": trial.suggest_float("reg_lambda", 0, 10),
+        "gamma": trial.suggest_float("gamma", 0, 5),
+        "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
+        "random_state": 42,
+        "eval_metric": "logloss",
+        "use_label_encoder": False,
+    }
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    auc_scores = []
+
+    for train_idx, val_idx in cv.split(X_global, y_global):
+        X_train_fold, X_val_fold = X_global.iloc[train_idx], X_global.iloc[val_idx]
+        y_train_fold, y_val_fold = y_global.iloc[train_idx], y_global.iloc[val_idx]
+
+        model = XGBClassifier(**params)
+        model.fit(
+            X_train_fold,
+            y_train_fold,
+            eval_set=[(X_val_fold, y_val_fold)],
+            verbose=0,
+        )
+        y_pred = model.predict_proba(X_val_fold)[:, 1]
+        auc = roc_auc_score(y_val_fold, y_pred)
+        auc_scores.append(auc)
+
+    return np.mean(auc_scores)
 
 def main():
-    # 設定路徑
-    data_dir = "data"
-    model_dir = "model"
-    model_path = os.path.join(model_dir, "model.pkl")
-    
-    # 檢查 data 資料夾是否存在
-    if not os.path.exists(data_dir):
-        print(f"❌ 錯誤: '{data_dir}' 資料夾不存在！")
-        print("請先建立 'data' 資料夾，並將你的 Excel 檔案放入其中。")
-        return
-    
-    # 列出所有 .xlsx 檔案
-    excel_files = [f for f in os.listdir(data_dir) if f.endswith('.xlsx')]
-    if not excel_files:
-        print(f"❌ 錯誤: '{data_dir}' 中沒有 .xlsx 檔案！")
-        return
-    
-    print(f"📥 找到 {len(excel_files)} 個 Excel 檔案: {excel_files}")
-    
-    # 合併所有數據
-    all_data = []
-    for file in excel_files:
-        try:
-            df = pd.read_excel(os.path.join(data_dir, file))
-            # 🔥 關鍵修正：自動移除欄位名稱中的所有空格
-            df.columns = df.columns.astype(str).str.replace(' ', '', regex=False)
-            all_data.append(df)
-            print(f"✅ 已載入: {file} ({len(df)} 筆記錄)")
-        except Exception as e:
-            print(f"⚠️ 跳過 {file}: {e}")
-    
-    if not all_data:
-        print("❌ 沒有成功載入任何數據！")
-        return
-    
-    df = pd.concat(all_data, ignore_index=True)
-    print(f"\n📊 總共合併 {len(df)} 筆賽馬記錄")
-    
-    # 必要欄位（無空格版本，因已自動清理）
-    required_cols = ["名次", "實際負磅", "排位體重", "檔位", "獨贏賠率", "騎師", "練馬師"]
-    
-    # 檢查欄位是否存在
-    missing_cols = [col for col in required_cols if col not in df.columns]
-    if missing_cols:
-        print(f"❌ 缺少必要欄位: {missing_cols}")
-        print("可用欄位:", list(df.columns))
-        return
-    
-    # 只保留必要欄位
-    df = df[required_cols].copy()
-    
-    # 清理數據
-    df = df.dropna(subset=["名次"])  # 移除名次缺失
-    df["名次"] = pd.to_numeric(df["名次"], errors="coerce")
-    df = df.dropna(subset=["名次"])
-    
-    # 目標變量：是否入前三
-    df["is_top3"] = df["名次"].apply(lambda x: 1 if x in [1, 2, 3] else 0)
-    
-    # 處理賠率（現在欄位是 '獨贏賠率'，無空格）
-    df["獨贏賠率"] = pd.to_numeric(df["獨贏賠率"], errors="coerce")
-    df["獨贏賠率"] = df["獨贏賠率"].fillna(999)  # 冷門馬設高值
-    
-    # 騎師 & 練馬師編碼
-    df["jockey_id"] = pd.Categorical(df["騎師"]).codes
-    df["trainer_id"] = pd.Categorical(df["練馬師"]).codes
-    
-    # 特徵欄位（無空格）
-    feature_cols = ["實際負磅", "排位體重", "檔位", "獨贏賠率", "jockey_id", "trainer_id"]
-    df = df.dropna(subset=feature_cols)
-    
-    print(f"🔧 有效訓練樣本數: {len(df)}")
-    
-    if len(df) < 10:
-        print("❌ 數據太少，無法訓練模型！")
-        return
-    
-    # 準備訓練數據
-    X = df[feature_cols]
-    y = df["is_top3"]
-    
-    # 分割數據
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
-    
-    # 訓練模型
-    print("🧠 訓練隨機森林模型...")
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
-    
-    # 評估
-    y_pred = model.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    print(f"✅ 測試準確率: {acc:.2%}")
-    print("\n📊 分類報告:")
-    print(classification_report(y_test, y_pred, target_names=["未入位", "入位"]))
-    
-    # 儲存模型
-    Path(model_dir).mkdir(exist_ok=True)
-    joblib.dump(model, model_path)
-    print(f"\n💾 模型已儲存至: {model_path}")
-    print("\n🎉 訓練完成！現在可以部署 API 了。")
+    global X_global, y_global
+
+    print("🔄 正在讀取 historical_races.csv...")
+    df = pd.read_csv("historical_races.csv")
+    print(f"📊 原始資料形狀: {df.shape}")
+
+    # 移除非數值/非必要欄位
+    cols_to_drop = ["race_date", "horse_name"]
+    df = df.drop(columns=cols_to_drop, errors='ignore')
+    print(f"✅ 已移除欄位: {cols_to_drop}")
+
+    # 檢查目標變數
+    if "is_top3" not in df.columns:
+        raise ValueError("❌ 缺少 'is_top3' 欄位！")
+
+    df = df.rename(columns={"is_top3": "top3"})
+    y = df["top3"]
+    X = df.drop(columns=["top3"])
+
+    # 編碼類別變數
+    categorical_cols = ["jockey", "trainer", "track_condition", "class"]
+    encoders = {}
+    for col in categorical_cols:
+        if col in X.columns:
+            le = LabelEncoder()
+            X[col] = X[col].fillna("未知").astype(str)
+            X[col] = le.fit_transform(X[col])
+            encoders[col] = le
+
+    # 確保無 object 型態
+    object_cols = X.select_dtypes(include=['object']).columns.tolist()
+    if object_cols:
+        raise ValueError(f"❌ 仍有 object 型欄位: {object_cols}")
+
+    print(f"✅ 最終特徵矩陣形狀: {X.shape}")
+    print("使用特徵:", list(X.columns))
+
+    # 設定全域變數供 Optuna 使用
+    X_global = X
+    y_global = y
+
+    # ====== 1. 超參數調優 ======
+    print("\n🔍 開始 Optuna 超參數調優（目標：最大化 AUC）...")
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=50)  # 可調整試驗次數（建議 30～100）
+
+    print(f"\n🎯 最佳 AUC: {study.best_value:.4f}")
+    print("最佳參數:")
+    for k, v in study.best_params.items():
+        print(f"  {k}: {v}")
+
+    # ====== 2. 用最佳參數訓練最終模型 ======
+    best_params = study.best_params
+    best_params.update({
+        "random_state": 42,
+        "eval_metric": "logloss",
+        "use_label_encoder": False,
+    })
+
+    print("\n🚀 使用最佳參數訓練最終模型...")
+    final_model = XGBClassifier(**best_params)
+    final_model.fit(X, y)
+
+    # ====== 3. 評估（可選：用留一法或全資料 AUC）=====
+    y_pred_full = final_model.predict_proba(X)[:, 1]
+    full_auc = roc_auc_score(y, y_pred_full)
+    print(f"✅ 最終模型 AUC (全資料): {full_auc:.4f}")
+
+    # ====== 4. 儲存模型與編碼器 ======
+    joblib.dump(final_model, "model.pkl")
+    joblib.dump(encoders, "label_encoders.pkl")
+    print("\n💾 已儲存:")
+    print("   - model.pkl")
+    print("   - label_encoders.pkl")
+
+    # ====== 5. 輸出特徵重要性 ======
+    feat_imp = final_model.feature_importances_
+    features = X.columns
+    indices = np.argsort(feat_imp)[::-1]
+
+    print("\n🔝 特徵重要性排序:")
+    for i in range(len(features)):
+        print(f"  {i+1}. {features[indices[i]]}: {feat_imp[indices[i]]:.4f}")
+
+    # 繪圖
+    plt.figure(figsize=(10, 6))
+    plt.title("XGBoost Feature Importances")
+    plt.bar(range(len(feat_imp)), feat_imp[indices], align="center")
+    plt.xticks(range(len(feat_imp)), [features[i] for i in indices], rotation=45, ha='right')
+    plt.tight_layout()
+    plt.savefig("feature_importance.png", dpi=150)
+    print("\n📈 特徵重要性圖已儲存為 feature_importance.png")
 
 if __name__ == "__main__":
     main()

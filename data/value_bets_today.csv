@@ -1,0 +1,4 @@
+﻿race_name,horse_name,jockey,trainer,win_odds,predicted_top3_prob,edge,expected_return
+next_race_Race1,金鎗六十 (A123),何澤堯,呂健威,3.5,0.818,0.5323,1.8629
+next_race_Race2,飛來勁 (G058),布文,賀賢,5.7,0.6758,0.5004,2.852
+next_race_Race2,揚威四方 (G026),希威森,韋達,3.2,0.5891,0.2766,0.8852

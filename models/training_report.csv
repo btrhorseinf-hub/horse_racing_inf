@@ -1,0 +1,2 @@
+total_samples,top3_rate,xgb_auc,lgb_auc,feature_columns,timestamp
+800,0.48,0.7856360506962915,0.7842278203723988,"['win_odds', 'actual_weight', 'draw', 'race_distance', 'jockey_encoded', 'trainer_encoded', 'odds_rank', 'weight_per_distance']",2026-01-06 16:50:44
