@@ -13,4 +13,5 @@ requests==2.31.0
 matplotlib==3.8.2
 optuna==3.4.0
 shap==0.44.1; sys_platform != "win32"  # 非 Windows 使用標準版
+huggingface-hub==0.24.7
 
