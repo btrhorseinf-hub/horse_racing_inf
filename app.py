@@ -23,29 +23,26 @@ st.markdown("""
 """)
 
 # ======================
-# 🔒 載入模型與編碼器（帶錯誤處理）
+# 🔒 載入模型與編碼器
 # ======================
 @st.cache_resource
 def load_model_and_encoders():
-    model_path = "models/model.pkl"
-    encoders_path = "models/label_encoders.pkl"
-    features_path = "models/feature_names.pkl"
-
-    if not os.path.exists(model_path):
-        st.error(f"❌ 模型檔案不存在: {model_path}")
-        st.stop()
-    if not os.path.exists(encoders_path):
-        st.error(f"❌ 編碼器檔案不存在: {encoders_path}")
-        st.stop()
-    if not os.path.exists(features_path):
-        st.error(f"❌ 特徵名稱檔案不存在: {features_path}")
-        st.stop()
-
-    with open(model_path, 'rb') as f:
+    paths = {
+        'model': "models/model.pkl",
+        'encoders': "models/label_encoders.pkl",
+        'features': "models/feature_names.pkl"
+    }
+    
+    for name, path in paths.items():
+        if not os.path.exists(path):
+            st.error(f"❌ {name} 檔案不存在: {path}")
+            st.stop()
+    
+    with open(paths['model'], 'rb') as f:
         model = pickle.load(f)
-    with open(encoders_path, 'rb') as f:
+    with open(paths['encoders'], 'rb') as f:
         label_encoders = pickle.load(f)
-    with open(features_path, 'rb') as f:
+    with open(paths['features'], 'rb') as f:
         feature_names = pickle.load(f)
     
     return model, label_encoders, feature_names
@@ -53,30 +50,22 @@ def load_model_and_encoders():
 model, label_encoders, feature_names = load_model_and_encoders()
 
 # ======================
-# 🎛️ 使用者輸入（側邊欄）
+# 🎛️ 使用者輸入
 # ======================
 st.sidebar.header("🏇 請輸入參數")
 
-# 騎師 & 練馬師選單（排序）
 jockey_options = sorted(label_encoders['jockey'].classes_)
 trainer_options = sorted(label_encoders['trainer'].classes_)
 
 selected_jockey = st.sidebar.selectbox("騎師", jockey_options)
 selected_trainer = st.sidebar.selectbox("練馬師", trainer_options)
-
-# 數值輸入（UI 顯示友好名稱，內部使用正確欄位名）
 weight = st.sidebar.slider("實際負重 (kg)", 100, 140, 122)
 barrier = st.sidebar.number_input("檔位", min_value=1, max_value=14, value=5, step=1)
 win_odds = st.sidebar.number_input("🔹 獨贏賠率 (Win Odds)", min_value=1.0, max_value=200.0, value=5.0, step=0.1)
-
-race_distance = st.sidebar.selectbox(
-    "🏁 賽程距離 (米)",
-    options=[1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400],
-    index=3
-)
+race_distance = st.sidebar.selectbox("🏁 賽程距離 (米)", [1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400], index=3)
 
 # ======================
-# 🧪 預處理輸入（關鍵：欄位名稱必須與 train.py 完全一致）
+# 🧪 預處理輸入
 # ======================
 def preprocess_input(jockey, trainer, weight, barrier, win_odds, race_distance):
     try:
@@ -86,25 +75,20 @@ def preprocess_input(jockey, trainer, weight, barrier, win_odds, race_distance):
         st.warning(f"⚠️ 騎師或練馬師不在訓練資料中: {e}")
         st.stop()
     
-    # ⚠️ 欄位名稱必須與 train.py 的 FEATURES 完全一致
     input_df = pd.DataFrame({
         'jockey': [jockey_encoded],
         'trainer': [trainer_encoded],
-        'actual_weight': [weight],      # ← 必須是 actual_weight
-        'draw': [barrier],              # ← 必須是 draw
+        'actual_weight': [weight],
+        'draw': [barrier],
         'win_odds': [win_odds],
-        'race_distance': [race_distance] # ← 必須是 race_distance
+        'race_distance': [race_distance]
     })
-    # 確保順序與訓練時一致
-    input_df = input_df[feature_names]
-    return input_df
+    return input_df[feature_names]
 
-input_df = preprocess_input(
-    selected_jockey, selected_trainer, weight, barrier, win_odds, race_distance
-)
+input_df = preprocess_input(selected_jockey, selected_trainer, weight, barrier, win_odds, race_distance)
 
 # ======================
-# 🔮 預測與結果展示
+# 🔮 預測與結果
 # ======================
 if st.sidebar.button("🚀 預測"):
     proba = model.predict_proba(input_df)[0]
@@ -129,30 +113,39 @@ if st.sidebar.button("🚀 預測"):
             explainer = shap.TreeExplainer(model)
             shap_values = explainer.shap_values(input_df)
             
-            # 取「入前三」類別的 SHAP 值（index=1）
-            shap_vals = shap_values[1][0]  # 形狀: (n_features,)
+            # === 智能判斷格式 ===
+            if isinstance(shap_values, list) and len(shap_values) == 2:
+                shap_vals = shap_values[1][0]
+            else:
+                shap_vals = shap_values[0]
             
-            # 使用 matplotlib 手動繪製 bar plot（相容 Hugging Face）
-            fig, ax = plt.subplots(figsize=(6, 3))
-            bars = ax.barh(feature_names, shap_vals)
+            if len(shap_vals) != len(feature_names):
+                raise ValueError("SHAP 值長度不符")
             
-            # 添加數值標籤
-            for i, bar in enumerate(bars):
-                width = bar.get_width()
-                ax.text(width + 0.01, bar.get_y() + bar.get_height()/2,
-                        f"{width:+.2f}", va='center', fontsize=8)
+            # === 文字版 SHAP（最穩健）===
+            name_map = {
+                'jockey': '騎師',
+                'trainer': '練馬師',
+                'actual_weight': '實際負重',
+                'draw': '檔位',
+                'win_odds': '獨贏賠率',
+                'race_distance': '賽程距離'
+            }
             
-            ax.set_xlabel("SHAP 值")
-            ax.set_title("特徵對預測的貢獻")
-            ax.invert_yaxis()  # 最重要特徵在上
-            plt.tight_layout()
-            st.pyplot(fig)
-            
+            indices = np.argsort(np.abs(shap_vals))[::-1][:5]
+            for i in indices:
+                feat = feature_names[i]
+                val = shap_vals[i]
+                display_name = name_map.get(feat, feat)
+                color = "green" if val > 0 else "red"
+                sign = "+" if val > 0 else "-"
+                st.markdown(f"• **{display_name}**: <span style='color:{color}'>{sign}{abs(val):.2f}</span>", unsafe_allow_html=True)
+                
         except Exception as e:
-            st.warning(f"⚠️ SHAP 分析失敗: {str(e)[:100]}...")
+            st.warning(f"⚠️ SHAP 分析失敗: {str(e)[:100]}")
 
 # ======================
-# 📈 特徵重要性（訓練階段）
+# 📈 特徵重要性
 # ======================
 st.markdown("---")
 st.subheader("📈 特徵重要性（模型訓練階段）")
@@ -163,7 +156,6 @@ try:
         'importance': importances
     }).sort_values('importance', ascending=False)
     
-    # 中文化顯示
     name_map = {
         'jockey': '騎師',
         'trainer': '練馬師',
